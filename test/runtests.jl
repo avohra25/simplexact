@@ -7,4 +7,5 @@ include("helpers.jl")
     include("test_solve.jl")
     include("test_certificates.jl")
     include("test_mip.jl")
+    include("test_lpformat.jl")
 end
