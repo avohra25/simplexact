@@ -9,8 +9,9 @@ Standard library only, no dependencies.
 ## Status
 
 Work in progress. So far: the model API, the two-phase primal simplex method,
-and exact certificates with an independent verifier. Mixed-integer solving and
-a file format/CLI come next.
+exact certificates with an independent verifier, and branch and bound for
+mixed-integer programs with a checkable proof tree. A file format and CLI come
+next.
 
 ```julia
 using Simplexact
@@ -55,6 +56,41 @@ sol.duals                       # d objective / d rhs for each row
 The test suite compares against brute-force vertex enumeration on hundreds of
 random LPs and verifies certificates on thousands more, including unbounded
 and infeasible ones.
+
+## Mixed-integer programs
+
+Mark variables with `integer = true` and call `solve_mip`. Integrality is
+tested exactly, so there is no "0.9999999 is close enough to 1".
+
+```julia
+lp = LP(:max)
+xs = [add_variable!(lp, "x$i"; ub = 1, integer = true) for i in 1:3]
+set_objective!(lp, [xs[1] => 60, xs[2] => 100, xs[3] => 120])
+add_constraint!(lp, [xs[1] => 10, xs[2] => 20, xs[3] => 30], :le, 50)
+
+sol = solve_mip(lp)
+sol.status, sol.objective   # (:optimal, 220//1)
+verify_mip(lp, sol)         # true
+```
+
+`solve_mip` keeps the whole branch-and-bound tree as a proof. Each leaf holds
+the LP solution for its box: a Farkas certificate (infeasible), an integral
+optimum, or a dual bound that cannot beat the incumbent. `verify_mip`
+recomputes every box from the root bounds and the branching decisions, checks
+that the children of each branch cover every integer value, and re-checks each
+leaf's LP certificate, so a reported optimum is proven, not just found.
+
+Other details:
+
+- integer bounds are rounded inward before solving;
+- when every variable in the objective is integer, objective values live on a
+  lattice (`objconst + g * Z`), and LP bounds are rounded up to it before
+  pruning, which closes many nodes early without losing exactness;
+- `strategy = :best_first | :depth_first`, `branching = :most_fractional | :first`;
+- `node_limit` stops early with status `:node_limit`, the best incumbent so far
+  and a proven bound;
+- an unbounded relaxation is reported as `:relaxation_unbounded` rather than
+  guessed at.
 
 ## Running the tests
 
