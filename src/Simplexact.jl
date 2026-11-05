@@ -6,12 +6,13 @@ and never depend on floating-point tolerances.
 """
 module Simplexact
 
-export LP, Var, Solution, Q, add_variable!, add_constraint!, set_objective!, solve,
+export LP, Var, Solution, Q, add_variable!, add_constraint!, set_objective!, solve, verify, check_certificate,
     parse_q, tonum, fmt, decimal, objective_value, is_feasible, nvars, nrows
 
 include("model.jl")
 include("stdform.jl")
 include("simplex.jl")
 include("solve.jl")
+include("verify.jl")
 
 end # module

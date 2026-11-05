@@ -8,8 +8,9 @@ Standard library only, no dependencies.
 
 ## Status
 
-Work in progress; this first commit has the model API and the two-phase primal
-simplex method. More follows over the next few commits.
+Work in progress. So far: the model API, the two-phase primal simplex method,
+and exact certificates with an independent verifier. Mixed-integer solving and
+a file format/CLI come next.
 
 ```julia
 using Simplexact
@@ -30,6 +31,30 @@ sol[x], sol[y]  # (3//1, 1//1)
 
 Variables take exact bounds (`lb`/`ub`, `nothing` for infinite, negative
 lower bounds and free variables are fine). Rows can be `:le`, `:ge` or `:eq`.
+
+## Certificates
+
+Every answer comes with proof that can be checked without trusting the simplex
+code. `verify(lp, sol)` re-checks it against the original problem using only
+exact arithmetic:
+
+- optimal: a feasible point plus dual multipliers (`sol.duals`, shadow prices,
+  and `sol.reduced_costs`) whose dual bound equals the objective (strong duality);
+- infeasible: Farkas multipliers (`sol.farkas`) whose combination of the rows
+  contradicts the variable bounds;
+- unbounded: a feasible point and a ray (`sol.ray`) that stays feasible while
+  the objective improves.
+
+```julia
+sol = solve(lp)
+verify(lp, sol)                 # true
+check_certificate(lp, sol)      # nothing, or a string saying what is wrong
+sol.duals                       # d objective / d rhs for each row
+```
+
+The test suite compares against brute-force vertex enumeration on hundreds of
+random LPs and verifies certificates on thousands more, including unbounded
+and infeasible ones.
 
 ## Running the tests
 

@@ -11,7 +11,7 @@ end
 "Raw outcome of the standard-form solve."
 struct StdResult
     status::Symbol                    # :optimal, :infeasible or :unbounded
-    x::Vector{Q}                      # standard-form point (optimal only)
+    x::Vector{Q}                      # standard-form point (feasible when optimal or unbounded)
     y::Vector{Q}                      # row multipliers: optimal duals, or the Farkas vector when infeasible
     d::Vector{Q}                      # unbounded: improving ray in standard-form space
     basis::Vector{Int}
@@ -149,17 +149,17 @@ function simplex_std(sf::StdForm; rule::Symbol = :auto)
     cost2 = vcat(sf.c, zeros(Q, m))
     rc = reduced_costs(tab, cost2)
     status, e = iterate!(tab, rc, n, rule)
+    x = zeros(Q, n)
+    for i in 1:m
+        tab.basis[i] <= n && (x[tab.basis[i]] = T[i, end])
+    end
     if status === :unbounded
         d = zeros(Q, n)
         d[e] = 1
         for i in 1:m
             tab.basis[i] <= n && (d[tab.basis[i]] = -T[i, e])
         end
-        return StdResult(:unbounded, Q[], Q[], d, copy(tab.basis), tab.iterations)
-    end
-    x = zeros(Q, n)
-    for i in 1:m
-        tab.basis[i] <= n && (x[tab.basis[i]] = T[i, end])
+        return StdResult(:unbounded, x, Q[], d, copy(tab.basis), tab.iterations)
     end
     y = [-rc[n+i] for i in 1:m]
     StdResult(:optimal, x, y, Q[], copy(tab.basis), tab.iterations)
