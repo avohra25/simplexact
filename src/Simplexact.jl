@@ -1,0 +1,17 @@
+"""
+Simplexact: an exact linear-programming solver.
+
+All arithmetic is done in `Rational{BigInt}`, so statuses and optima are exact
+and never depend on floating-point tolerances.
+"""
+module Simplexact
+
+export LP, Var, Solution, Q, add_variable!, add_constraint!, set_objective!, solve,
+    parse_q, tonum, fmt, decimal, objective_value, is_feasible, nvars, nrows
+
+include("model.jl")
+include("stdform.jl")
+include("simplex.jl")
+include("solve.jl")
+
+end # module
