@@ -10,4 +10,5 @@ include("helpers.jl")
     include("test_lpformat.jl")
     include("test_mps.jl")
     include("test_iis.jl")
+    include("test_repair.jl")
 end

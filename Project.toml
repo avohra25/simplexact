@@ -1,7 +1,7 @@
 name = "Simplexact"
 uuid = "5f0c2f3e-6d0a-4b7e-9a51-3c1d8e2b7a41"
 authors = ["Aryan Vohra"]
-version = "0.1.0"
+version = "0.2.0"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"

@@ -173,4 +173,14 @@ end
     @test code == 0 && occursin("feasible (unbounded)", out)
     code, out, _ = run_cli("solve", joinpath(EXAMPLES, "staffing.lp"))
     @test code == 0 && occursin("simplexact iis", out)
+    # feasibility repair
+    code, out, _ = run_cli("repair", joinpath(EXAMPLES, "staffing.lp"), "--decimal")
+    @test code == 0 && occursin("least total violation: 3/4", out) && occursin("coverage by 3/4", out)
+    @test occursin("proof: verified", out)
+    code, out, _ = run_cli("repair", joinpath(EXAMPLES, "staffing.lp"), "--weights", "coverage=1000,mentoring=1000", "--optimize")
+    @test code == 0 && occursin("budget by 60", out) && occursin("objective: 960", out)
+    code, out, _ = run_cli("repair", joinpath(EXAMPLES, "diet.lp"), "--relax-bounds", "--bound-weight", "1/2")
+    @test code == 0 && occursin("nothing had to be violated", out)
+    @test run_cli("repair", joinpath(EXAMPLES, "staffing.lp"), "--weights", "nope=1")[1] == 1
+    @test run_cli("repair", joinpath(EXAMPLES, "staffing.lp"), "--weights", "coverage")[1] == 1
 end

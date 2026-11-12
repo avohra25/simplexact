@@ -11,6 +11,7 @@ export LP, Var, Solution, Q, add_variable!, add_constraint!, set_objective!, sol
     parse_lp, read_lp, write_lp, LPParseError,
     parse_mps, read_mps, write_mps, MPSParseError, read_model,
     IIS, find_iis, check_iis, verify_iis,
+    Repair, feasibility_repair, check_repair, verify_repair,
     parse_q, tonum, fmt, decimal, objective_value, is_feasible, nvars, nrows
 
 include("model.jl")
@@ -20,6 +21,7 @@ include("solve.jl")
 include("verify.jl")
 include("mip.jl")
 include("iis.jl")
+include("repair.jl")
 include("lpformat.jl")
 include("mpsformat.jl")
 include("cli.jl")

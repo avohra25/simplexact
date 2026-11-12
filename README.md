@@ -25,6 +25,10 @@ Standard library only, no dependencies. Tested on Julia 1.11.
 - **Irreducible infeasible subsystems**: for an infeasible LP, a minimal set
   of rows and bounds that conflict, with a proof that it is infeasible and
   that dropping any one member makes it feasible.
+- **Feasibility repair**: the point that violates the rows (and optionally
+  the bounds) by the least weighted total, proven least by an exact
+  certificate, optionally optimizing the original objective among those
+  points.
 - **Branch and bound** for mixed-integer programs with exact integrality,
   best-first or depth-first search, objective-lattice bound rounding, a node
   limit, and a proof tree that `verify_mip` re-checks leaf by leaf.
@@ -116,6 +120,43 @@ that aren't members are removed from the subsystem, so its variables may be
 free. A variable with `lb > ub` is an IIS by itself. Integrality is ignored,
 so for a MIP this explains the LP relaxation (and `find_iis` refuses a
 problem whose relaxation is feasible).
+
+## Repairing an infeasible model
+
+An IIS says *why* a model has no solution; `feasibility_repair` says what
+the smallest fix is. It solves the elastic model, where each row gets
+non-negative violation variables (two for an equality) and their weighted
+sum is minimized:
+
+```julia
+lp = read_lp("examples/staffing.lp")
+r = feasibility_repair(lp)
+r.violation                 # 3//4: the least total violation
+r.row_violation             # [3//4, 0, 0, 0, 0, 0]: coverage falls 3/4 short
+r.x                         # the repaired plan
+
+# protect coverage and mentoring, and also pick the cheapest repaired plan
+r = feasibility_repair(lp; weights = Dict("coverage" => 1000, "mentoring" => 1000), optimize = true)
+r.row_violation[3], r.objective     # (60//1, 960//1): go 60 over budget, cost 960
+verify_repair(lp, r)        # true
+```
+
+- `weights` is a vector with one positive weight per row, or a `Dict` from
+  row name to weight (unlisted rows weigh 1).
+- `relax_bounds = true` lets variable bounds move too, at `bound_weight` per
+  unit; otherwise bounds are hard, and contradictory bounds give status
+  `:infeasible`.
+- `optimize = true` re-solves with the original objective, constrained to the
+  least-violation points (status `:unbounded` if it is unbounded there).
+- Integer variables stay integer; the elastic model is then solved with
+  branch and bound and verified with its proof tree.
+- A feasible model repairs with violation 0, and with `optimize` the repair
+  is its optimum.
+
+`check_repair` rebuilds the elastic model from the original problem (a
+tampered model is caught), verifies its certificate, and recomputes every
+violation from `x`. At a least-violation point, every IIS has at least one
+violated member; the tests check that too.
 
 ## Mixed-integer programs
 
@@ -238,9 +279,10 @@ proof: verified (branch-and-bound tree checked exactly)
 ```
 
 Commands: `solve`, `iis` (print an irreducible infeasible subsystem with its
-multipliers, verified), `check` (summary) and `format` (canonical LP text, or MPS
-with `--to mps`, plus `--strict` to refuse values without an exact decimal
-form). Files ending in `.mps` are read as MPS; `--format lp|mps|fixed-mps`
+multipliers, verified), `repair` (least-violation point; `--weights
+ROW=W,...`, `--relax-bounds`, `--bound-weight W`, `--optimize`), `check` (summary)
+and `format` (canonical LP text, or MPS with `--to mps`, plus `--strict` to
+refuse values without an exact decimal form). Files ending in `.mps` are read as MPS; `--format lp|mps|fixed-mps`
 overrides the guess.
 
 ```
@@ -255,8 +297,8 @@ and `--no-verify`.
 ## Examples
 
 `examples/` has a diet problem, a transportation problem, a 0/1 knapsack,
-infeasible and unbounded LPs, an infeasible staffing plan for `iis`
-(`staffing.lp`), Beale's cycling example, the classic MPS
+infeasible and unbounded LPs, an infeasible staffing plan for `iis` and
+`repair` (`staffing.lp`), Beale's cycling example, the classic MPS
 example `testprob.mps` (with a range), and `api.jl`, a small
 production-planning MIP built from Julia:
 
@@ -270,7 +312,7 @@ julia --project=. examples/api.jl
 julia --project=. test/runtests.jl
 ```
 
-About 10,800 checks, including:
+About 11,800 checks, including:
 
 - hundreds of random bounded LPs compared against brute-force vertex
   enumeration (every choice of active hyperplanes, solved exactly);
@@ -283,6 +325,10 @@ About 10,800 checks, including:
 - IISs of random infeasible LPs, verified and independently re-solved with
   each member removed to confirm irreducibility, plus tampered IISs that
   `check_iis` must reject;
+- feasibility repairs of random problems (weighted, with and without relaxed
+  bounds, integer and continuous) that must verify, be zero exactly when the
+  problem is feasible, violate a member of every IIS, and match brute-force
+  vertex enumeration of the elastic model;
 - shadow prices checked against actually perturbing the right-hand side;
 - LP-format and MPS round trips on random problems (MPS output must
   re-read to the identical problem and describe the same model as the LP

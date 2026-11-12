@@ -8,10 +8,16 @@ commands:
   check FILE     parse the file and print a summary
   format FILE    print the file in canonical LP format (or MPS with --to mps)
   iis FILE       explain an infeasible LP: a smallest set of rows and bounds that conflict
+  repair FILE    find the point that violates the rows by the least weighted total
 
 input options:
   --format auto|lp|mps|fixed-mps
                           how to read FILE; auto uses the extension (.mps is MPS)
+
+repair options:
+  --weights ROW=W,...     per-row violation weights (default 1)
+  --relax-bounds          let variable bounds be violated too (weight 1, or --bound-weight W)
+  --optimize              then optimize the original objective among least-violation points
 
 format options:
   --to lp|mps             output format (default lp)
@@ -70,6 +76,62 @@ function run_iis(io, err, lp::LP, rule::Symbol, check::Bool)
     0
 end
 
+function run_repair(io, err, lp::LP, opts, flags)
+    dec = "--decimal" in flags
+    weights = Dict{String,Q}()
+    try
+        for item in split(get(opts, "--weights", ""), ','; keepempty = false)
+            k, v = split(item, '='; limit = 2)
+            weights[strip(k)] = parse_q(v)
+        end
+    catch e
+        e isa ArgumentError || e isa BoundsError || rethrow()
+        println(err, "--weights needs ROW=WEIGHT pairs separated by commas"); return 1
+    end
+    node_limit = tryparse(Int, get(opts, "--node-limit", "100000"))
+    node_limit === nothing && (println(err, "--node-limit needs an integer"); return 1)
+    r = try
+        feasibility_repair(lp; weights, relax_bounds = "--relax-bounds" in flags,
+            bound_weight = parse_q(get(opts, "--bound-weight", "1")), optimize = "--optimize" in flags,
+            rule = Symbol(get(opts, "--rule", "auto")), node_limit)
+    catch e
+        e isa ArgumentError || rethrow()
+        print(err, "error: "); showerror(err, e); println(err)
+        return 1
+    end
+    println(io, "status: ", r.status)
+    if r.violation !== nothing
+        print(io, "least total violation: "); show_value(io, r.violation, dec); println(io)
+    end
+    r.status === :optimal || return 0
+    if r.optimize || iszero(r.violation)
+        print(io, "objective: "); show_value(io, r.objective, dec); println(io)
+    end
+    for j in eachindex(r.x)
+        print(io, "  ", lp.names[j], " = "); show_value(io, r.x[j], dec); println(io)
+    end
+    if iszero(r.violation)
+        println(io, "the problem is feasible; nothing had to be violated")
+    else
+        println(io, "violated:")
+        for (i, row) in enumerate(lp.rows)
+            iszero(r.row_violation[i]) && continue
+            print(io, "  ", row.name, " by "); show_value(io, r.row_violation[i], dec)
+            print(io, "    ("); show_row(io, lp, row); println(io, ")")
+        end
+        for j in 1:nvars(lp)
+            iszero(r.lower_violation[j]) || (print(io, "  lower bound of ", lp.names[j], " by "); show_value(io, r.lower_violation[j], dec); println(io))
+            iszero(r.upper_violation[j]) || (print(io, "  upper bound of ", lp.names[j], " by "); show_value(io, r.upper_violation[j], dec); println(io))
+        end
+    end
+    if !("--no-verify" in flags)
+        reason = check_repair(lp, r)
+        reason === nothing || (println(io, "proof: INVALID (", reason, ")"); return 1)
+        println(io, "proof: verified (least violation proven by the elastic model's certificate)")
+    end
+    0
+end
+
 function show_value(io, q::Q, dec::Bool)
     print(io, fmt(q))
     dec && !isone(denominator(q)) && print(io, "  (≈ ", decimal(q), ")")
@@ -91,11 +153,11 @@ function main(args::Vector{String}; io::IO = stdout, err::IO = stderr)
     i = 2
     while i <= length(args)
         a = args[i]
-        if a in ("--rule", "--strategy", "--node-limit", "--format", "--to")
+        if a in ("--rule", "--strategy", "--node-limit", "--format", "--to", "--weights", "--bound-weight")
             i < length(args) || (println(err, "missing value for $a"); return 1)
             opts[a] = args[i+1]
             i += 2
-        elseif a in ("--relax", "--decimal", "--duals", "--no-verify", "--strict")
+        elseif a in ("--relax", "--decimal", "--duals", "--no-verify", "--strict", "--relax-bounds", "--optimize")
             push!(flags, a)
             i += 1
         elseif startswith(a, "--")
@@ -139,6 +201,8 @@ function main(args::Vector{String}; io::IO = stdout, err::IO = stderr)
         return 0
     elseif cmd == "iis"
         return run_iis(io, err, lp, Symbol(get(opts, "--rule", "auto")), !("--no-verify" in flags))
+    elseif cmd == "repair"
+        return run_repair(io, err, lp, opts, flags)
     elseif cmd != "solve"
         println(err, "unknown command $cmd"); print(err, USAGE); return 1
     end
