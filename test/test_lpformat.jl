@@ -92,6 +92,8 @@ end
     tr = read_lp(joinpath(EXAMPLES, "transport.lp"))
     st = solve(tr)
     @test st.objective == 3415 // 2 && verify(tr, st)
+    staff = read_lp(joinpath(EXAMPLES, "staffing.lp"))
+    @test solve(staff).status === :infeasible && verify_iis(staff, find_iis(staff))
     inf = read_lp(joinpath(EXAMPLES, "infeasible.lp"))
     si = solve(inf)
     @test si.status === :infeasible && verify(inf, si)
@@ -161,4 +163,14 @@ end
     code, _, err = run_cli("format", thirds, "--to", "mps", "--strict")
     @test code == 1 && occursin("exact decimal", err)
     @test run_cli("format", thirds, "--to", "json")[1] == 1
+    # IIS
+    code, out, _ = run_cli("iis", joinpath(EXAMPLES, "staffing.lp"))
+    @test code == 0 && occursin("3 rows, 0 bounds", out) && occursin("budget:", out)
+    @test !occursin("desks", out) && occursin("proof: verified", out)
+    code, out, _ = run_cli("iis", joinpath(EXAMPLES, "diet.lp"))
+    @test code == 0 && occursin("nothing to explain", out)
+    code, out, _ = run_cli("iis", joinpath(EXAMPLES, "unbounded.lp"))
+    @test code == 0 && occursin("feasible (unbounded)", out)
+    code, out, _ = run_cli("solve", joinpath(EXAMPLES, "staffing.lp"))
+    @test code == 0 && occursin("simplexact iis", out)
 end

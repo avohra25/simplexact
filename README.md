@@ -22,6 +22,9 @@ Standard library only, no dependencies. Tested on Julia 1.11.
   infeasibility, and a feasible point plus improving ray proving
   unboundedness.
 - **Shadow prices and reduced costs** for optimal LPs.
+- **Irreducible infeasible subsystems**: for an infeasible LP, a minimal set
+  of rows and bounds that conflict, with a proof that it is infeasible and
+  that dropping any one member makes it feasible.
 - **Branch and bound** for mixed-integer programs with exact integrality,
   best-first or depth-first search, objective-lattice bound rounding, a node
   limit, and a proof tree that `verify_mip` re-checks leaf by leaf.
@@ -83,6 +86,36 @@ sol.status          # :infeasible
 sol.farkas          # [2//5, 1//5, -1]: 2/5 a + 1/5 b - c gives 0 <= -11/5
 verify(lp, sol)     # true
 ```
+
+## Explaining infeasibility
+
+A Farkas certificate proves that an LP is infeasible, but it can mention
+many rows. `find_iis` narrows it down to an irreducible infeasible subsystem
+(IIS): rows and variable bounds that conflict on their own, where removing
+any single one leaves a feasible system.
+
+```julia
+lp = read_lp("examples/staffing.lp")
+solve(lp).status            # :infeasible
+iis = find_iis(lp)
+[lp.rows[i].name for i in iis.rows]   # ["coverage", "mentoring", "budget"]
+iis.lower, iis.upper        # bounds that are part of the conflict (none here)
+iis.farkas                  # [-1, -1/4, 1/80]: the proof, row by row
+verify_iis(lp, iis)         # true
+```
+
+The search starts from the rows and bounds the solver's Farkas certificate
+uses, then runs a deletion filter: each member is dropped in turn and stays
+dropped if what's left is still infeasible. Every step is an exact solve, so
+the result really is irreducible, not "small up to tolerance".
+
+`check_iis` re-checks it without trusting the search: the multipliers must
+prove the subsystem infeasible, and every member carries a witness point that
+satisfies all the other members, which proves it can't be dropped. Bounds
+that aren't members are removed from the subsystem, so its variables may be
+free. A variable with `lb > ub` is an IIS by itself. Integrality is ignored,
+so for a MIP this explains the LP relaxation (and `find_iis` refuses a
+problem whose relaxation is feasible).
 
 ## Mixed-integer programs
 
@@ -204,7 +237,8 @@ nodes: 29, simplex iterations: 553
 proof: verified (branch-and-bound tree checked exactly)
 ```
 
-Commands: `solve`, `check` (summary) and `format` (canonical LP text, or MPS
+Commands: `solve`, `iis` (print an irreducible infeasible subsystem with its
+multipliers, verified), `check` (summary) and `format` (canonical LP text, or MPS
 with `--to mps`, plus `--strict` to refuse values without an exact decimal
 form). Files ending in `.mps` are read as MPS; `--format lp|mps|fixed-mps`
 overrides the guess.
@@ -221,7 +255,8 @@ and `--no-verify`.
 ## Examples
 
 `examples/` has a diet problem, a transportation problem, a 0/1 knapsack,
-infeasible and unbounded LPs, Beale's cycling example, the classic MPS
+infeasible and unbounded LPs, an infeasible staffing plan for `iis`
+(`staffing.lp`), Beale's cycling example, the classic MPS
 example `testprob.mps` (with a range), and `api.jl`, a small
 production-planning MIP built from Julia:
 
@@ -235,7 +270,7 @@ julia --project=. examples/api.jl
 julia --project=. test/runtests.jl
 ```
 
-About 7,200 checks, including:
+About 10,800 checks, including:
 
 - hundreds of random bounded LPs compared against brute-force vertex
   enumeration (every choice of active hyperplanes, solved exactly);
@@ -245,6 +280,9 @@ About 7,200 checks, including:
 - random MIPs compared against exhaustive enumeration of integer assignments,
   with every proof tree checked;
 - tampered certificates and proof trees that the verifiers must reject;
+- IISs of random infeasible LPs, verified and independently re-solved with
+  each member removed to confirm irreducibility, plus tampered IISs that
+  `check_iis` must reject;
 - shadow prices checked against actually perturbing the right-hand side;
 - LP-format and MPS round trips on random problems (MPS output must
   re-read to the identical problem and describe the same model as the LP

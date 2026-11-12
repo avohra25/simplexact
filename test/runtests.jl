@@ -9,4 +9,5 @@ include("helpers.jl")
     include("test_mip.jl")
     include("test_lpformat.jl")
     include("test_mps.jl")
+    include("test_iis.jl")
 end

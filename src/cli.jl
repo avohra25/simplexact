@@ -7,6 +7,7 @@ commands:
   solve FILE     solve an LP or MPS file (branch and bound if it has integer variables)
   check FILE     parse the file and print a summary
   format FILE    print the file in canonical LP format (or MPS with --to mps)
+  iis FILE       explain an infeasible LP: a smallest set of rows and bounds that conflict
 
 input options:
   --format auto|lp|mps|fixed-mps
@@ -25,6 +26,49 @@ solve options:
   --duals                 print shadow prices and reduced costs (LPs only)
   --no-verify             skip the independent certificate check
 """
+
+function show_row(io, lp::LP, r)
+    write_expr(io, lp, sort!(collect(r.coeffs))) && print(io, "0")
+    print(io, " ", r.sense === :le ? "<=" : r.sense === :ge ? ">=" : "=", " ", fmt(r.rhs))
+end
+
+function run_iis(io, err, lp::LP, rule::Symbol, check::Bool)
+    iis = try
+        find_iis(lp; rule)
+    catch e
+        e isa ArgumentError || rethrow()
+        println(io, "status: feasible (", occursin("unbounded", e.msg) ? "unbounded" : "optimal",
+            any(lp.integer) ? " as an LP relaxation" : "", "), nothing to explain")
+        return 0
+    end
+    nb = length(iis.lower) + length(iis.upper)
+    println(io, "status: infeasible")
+    println(io, "irreducible infeasible subsystem: ", length(iis.rows), " row", length(iis.rows) == 1 ? "" : "s",
+        ", ", nb, " bound", nb == 1 ? "" : "s")
+    if !isempty(iis.rows)
+        println(io, "rows (with Farkas multipliers):")
+        for (k, i) in enumerate(iis.rows)
+            r = lp.rows[i]
+            print(io, "  ", r.name, ": "); show_row(io, lp, r)
+            println(io, "    [", fmt(iis.farkas[k]), "]")
+        end
+    end
+    if nb > 0
+        println(io, "bounds:")
+        for j in sort!(unique(vcat(iis.lower, iis.upper)))
+            l = j in iis.lower ? fmt(lp.lb[j]) * " <= " : ""
+            u = j in iis.upper ? " <= " * fmt(lp.ub[j]) : ""
+            println(io, "  ", l, lp.names[j], u)
+        end
+    end
+    any(lp.integer) && println(io, "(integrality ignored: this explains the LP relaxation)")
+    if check
+        reason = check_iis(lp, iis)
+        reason === nothing || (println(io, "proof: INVALID (", reason, ")"); return 1)
+        println(io, "proof: verified (infeasible, and feasible without any one member)")
+    end
+    0
+end
 
 function show_value(io, q::Q, dec::Bool)
     print(io, fmt(q))
@@ -93,6 +137,8 @@ function main(args::Vector{String}; io::IO = stdout, err::IO = stderr)
         println(io, files[1], ": ", lp.sense === :max ? "maximize" : "minimize", ", ",
             nvars(lp), " variables (", nint, " integer), ", nrows(lp), " rows")
         return 0
+    elseif cmd == "iis"
+        return run_iis(io, err, lp, Symbol(get(opts, "--rule", "auto")), !("--no-verify" in flags))
     elseif cmd != "solve"
         println(err, "unknown command $cmd"); print(err, USAGE); return 1
     end
@@ -154,6 +200,7 @@ function main(args::Vector{String}; io::IO = stdout, err::IO = stderr)
                     iszero(sol.farkas[i]) && continue
                     print(io, "  ", r.name, ": "); show_value(io, sol.farkas[i], dec); println(io)
                 end
+                println(io, "(run `simplexact iis` for an irreducible set of conflicting rows and bounds)")
             end
             if check
                 reason = check_certificate(lp, sol)
