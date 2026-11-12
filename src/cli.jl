@@ -4,9 +4,17 @@ const USAGE = """
 usage: simplexact <command> [options] FILE
 
 commands:
-  solve FILE     solve an LP-format file (branch and bound if it has integer variables)
+  solve FILE     solve an LP or MPS file (branch and bound if it has integer variables)
   check FILE     parse the file and print a summary
-  format FILE    print the file in canonical LP format
+  format FILE    print the file in canonical LP format (or MPS with --to mps)
+
+input options:
+  --format auto|lp|mps|fixed-mps
+                          how to read FILE; auto uses the extension (.mps is MPS)
+
+format options:
+  --to lp|mps             output format (default lp)
+  --strict                with --to mps, refuse values that have no exact decimal form
 
 solve options:
   --relax                 ignore integrality and solve the LP relaxation
@@ -39,11 +47,11 @@ function main(args::Vector{String}; io::IO = stdout, err::IO = stderr)
     i = 2
     while i <= length(args)
         a = args[i]
-        if a in ("--rule", "--strategy", "--node-limit")
+        if a in ("--rule", "--strategy", "--node-limit", "--format", "--to")
             i < length(args) || (println(err, "missing value for $a"); return 1)
             opts[a] = args[i+1]
             i += 2
-        elseif a in ("--relax", "--decimal", "--duals", "--no-verify")
+        elseif a in ("--relax", "--decimal", "--duals", "--no-verify", "--strict")
             push!(flags, a)
             i += 1
         elseif startswith(a, "--")
@@ -54,15 +62,31 @@ function main(args::Vector{String}; io::IO = stdout, err::IO = stderr)
         end
     end
     length(files) == 1 || (print(err, USAGE); return 1)
+    infmt = get(Dict("auto" => :auto, "lp" => :lp, "mps" => :mps, "fixed-mps" => :fixedmps),
+        get(opts, "--format", "auto"), nothing)
+    infmt === nothing && (println(err, "--format must be auto, lp, mps or fixed-mps"); return 1)
     lp = try
-        read_lp(files[1])
+        read_model(files[1]; format = infmt)
     catch e
-        e isa LPParseError || e isa SystemError || e isa ArgumentError || rethrow()
+        e isa LPParseError || e isa MPSParseError || e isa SystemError || e isa ArgumentError || rethrow()
         print(err, files[1], ": "); showerror(err, e); println(err)
         return 1
     end
     if cmd == "format"
-        write_lp(io, lp)
+        to = get(opts, "--to", "lp")
+        if to == "lp"
+            write_lp(io, lp)
+        elseif to == "mps"
+            try
+                write_mps(io, lp; name = uppercase(splitext(basename(files[1]))[1]), strict = "--strict" in flags)
+            catch e
+                e isa ArgumentError || rethrow()
+                print(err, "error: "); showerror(err, e); println(err)
+                return 1
+            end
+        else
+            println(err, "--to must be lp or mps"); return 1
+        end
         return 0
     elseif cmd == "check"
         nint = count(lp.integer)

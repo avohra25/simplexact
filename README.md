@@ -27,7 +27,9 @@ Standard library only, no dependencies. Tested on Julia 1.11.
   limit, and a proof tree that `verify_mip` re-checks leaf by leaf.
 - **LP file format** (a CPLEX-style subset) with a parser that reports line
   numbers and a writer that round-trips exactly.
-- **CLI** to solve, check and reformat LP files.
+- **MPS files**, free and fixed, including `RANGES`, integer markers and every
+  common bound type, read exactly and written back losslessly.
+- **CLI** to solve, check and convert LP and MPS files.
 
 ## Quick start
 
@@ -146,6 +148,40 @@ variables on both sides. Ranged rows (`a <= expr <= b`) are rejected with a
 clear message: write two rows. `read_lp(path)`, `parse_lp(text)` and
 `write_lp(lp)` are the API; errors are `LPParseError`s with a line number.
 
+## MPS files
+
+`parse_mps(text)`, `read_mps(path)` and `write_mps(lp)` handle the
+column-oriented MPS format that most solvers and benchmark sets (Netlib,
+MIPLIB) use:
+
+```julia
+lp = read_mps("examples/testprob.mps")
+solve(lp).objective          # 37//2
+write_mps(lp)                # free MPS text
+read_model("model.mps")      # picks LP or MPS from the extension
+```
+
+- Free MPS is the default: fields are separated by whitespace, which also
+  reads fixed-format files whose names have no spaces. `fixed = true` reads
+  fields from the classic fixed columns, so names like `MY EQN` work.
+- Numbers are parsed exactly (`0.1` is `1//10`). Bounds of `1e30` or more,
+  and the words `Inf`/`Infinity`, are infinite.
+- Conventions follow CPLEX and Gurobi: the first `N` row is the objective and
+  later `N` rows are dropped; a right-hand side on the objective row is minus
+  the objective constant; `OBJSENSE MAX` (on the same line or the next) makes
+  it a maximization; `UP` with a negative value on a variable whose lower
+  bound was never set makes the lower bound `-inf`; variables between
+  `INTORG`/`INTEND` markers are integers with the default bounds.
+- Bound types `UP LO FX FR MI PL BV LI UI` are supported; `SC` is rejected
+  with a clear message. Only the first `RHS`, `RANGES` and `BOUNDS` set is used.
+- A `RANGES` entry splits a row in two: `L` row `r` with range `R` becomes
+  `r: ... <= rhs` and `r_lo: ... >= rhs - |R|`, a `G` row gets `r_hi`, and an
+  `E` row becomes `[rhs, rhs + R]` or `[rhs + R, rhs]` depending on the sign.
+- `write_mps` writes exact decimals when the value has one; a value like
+  `1/3` is written as `1/3`, which simplexact reads back but other solvers do
+  not, so `strict = true` raises an error instead.
+- Errors are `MPSParseError`s with a line number.
+
 ## Command line
 
 ```
@@ -168,15 +204,25 @@ nodes: 29, simplex iterations: 553
 proof: verified (branch-and-bound tree checked exactly)
 ```
 
-Commands: `solve`, `check` (summary) and `format` (canonical LP text). Solve
-options: `--relax`, `--rule auto|bland|dantzig`,
+Commands: `solve`, `check` (summary) and `format` (canonical LP text, or MPS
+with `--to mps`, plus `--strict` to refuse values without an exact decimal
+form). Files ending in `.mps` are read as MPS; `--format lp|mps|fixed-mps`
+overrides the guess.
+
+```
+$ julia --project=. bin/simplexact.jl format examples/knapsack.lp --to mps > knapsack.mps
+$ julia --project=. bin/simplexact.jl solve knapsack.mps
+```
+
+Solve options: `--relax`, `--rule auto|bland|dantzig`,
 `--strategy best_first|depth_first`, `--node-limit N`, `--decimal`, `--duals`
 and `--no-verify`.
 
 ## Examples
 
 `examples/` has a diet problem, a transportation problem, a 0/1 knapsack,
-infeasible and unbounded LPs, Beale's cycling example, and `api.jl`, a small
+infeasible and unbounded LPs, Beale's cycling example, the classic MPS
+example `testprob.mps` (with a range), and `api.jl`, a small
 production-planning MIP built from Julia:
 
 ```
@@ -189,7 +235,7 @@ julia --project=. examples/api.jl
 julia --project=. test/runtests.jl
 ```
 
-About 5,300 checks, including:
+About 7,200 checks, including:
 
 - hundreds of random bounded LPs compared against brute-force vertex
   enumeration (every choice of active hyperplanes, solved exactly);
@@ -200,7 +246,9 @@ About 5,300 checks, including:
   with every proof tree checked;
 - tampered certificates and proof trees that the verifiers must reject;
 - shadow prices checked against actually perturbing the right-hand side;
-- LP-format round trips on random problems, parser error messages, and the CLI.
+- LP-format and MPS round trips on random problems (MPS output must
+  re-read to the identical problem and describe the same model as the LP
+  writer), fixed-column MPS, parser error messages, and the CLI.
 
 ## Design notes
 

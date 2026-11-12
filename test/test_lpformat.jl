@@ -139,4 +139,26 @@ end
     @test run_cli("solve", joinpath(EXAMPLES, "diet.lp"), "--rule", "nope")[1] == 1
     @test run_cli("solve", joinpath(EXAMPLES, "diet.lp"), "--bogus")[1] == 1
     @test run_cli("help")[1] == 0
+    # MPS input and output
+    code, out, _ = run_cli("solve", joinpath(EXAMPLES, "testprob.mps"))
+    @test code == 0 && occursin("objective: 37/2", out) && occursin("certificate: verified", out)
+    code, out, _ = run_cli("check", joinpath(EXAMPLES, "testprob.mps"))
+    @test code == 0 && occursin("3 variables (0 integer), 4 rows", out)
+    code, out, _ = run_cli("format", joinpath(EXAMPLES, "knapsack.lp"), "--to", "mps")
+    @test code == 0 && startswith(out, "NAME          KNAPSACK") && occursin("'INTORG'", out)
+    @test solve_mip(parse_mps(out)).objective == solve_mip(read_lp(joinpath(EXAMPLES, "knapsack.lp"))).objective
+    code, out, _ = run_cli("format", joinpath(EXAMPLES, "testprob.mps"))
+    @test code == 0 && occursin("LIM1_lo: XONE + YTWO >= 3/2", out)
+    mps = tempname() * ".txt"
+    write(mps, read(joinpath(EXAMPLES, "testprob.mps"), String))
+    @test run_cli("solve", mps, "--format", "mps")[1] == 0
+    code, _, err = run_cli("solve", mps, "--format", "lp")
+    @test code == 1 && occursin("line", err)
+    @test run_cli("solve", mps, "--format", "xml")[1] == 1
+    thirds = tempname() * ".lp"
+    write(thirds, "min\n 1/3 x\nst\n x >= 1/3\nend\n")
+    @test run_cli("format", thirds, "--to", "mps")[1] == 0
+    code, _, err = run_cli("format", thirds, "--to", "mps", "--strict")
+    @test code == 1 && occursin("exact decimal", err)
+    @test run_cli("format", thirds, "--to", "json")[1] == 1
 end
